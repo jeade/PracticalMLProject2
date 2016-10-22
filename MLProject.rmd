@@ -1,0 +1,120 @@
+---
+title: "Prediction Assignment"
+author: "Jeremy Eade"
+date: "October 22, 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+require(caret)
+require(dplyr)
+```
+
+## Prediction Assignment Writeup
+
+### 1. Objectives
+The goal of this project is to predict the manner (A,B,C,D or E) that participants performed an exercise using accelerometer data from the belt, forearm, arm and dumbell of the six particpants.
+
+The report below describes how the model was built, use of cross-validation, estimated sample error, decisions made (eg model selection) and the results obtained (prediction of the twenty different test cases).
+
+### 2. Read and Prepare Data
+
+```{r readAndPrepareData,echo=TRUE}
+
+# For reproducibility
+set.seed(62433)
+
+# Read in the data and handle NAs in the source files
+training <- read.csv('pml-training.csv',header=TRUE,stringsAsFactors=FALSE,na.strings = c('NA','','#DIV/0!'),as.is = TRUE)
+testing <- read.csv('pml-testing.csv',header=TRUE,stringsAsFactors=FALSE,na.strings = c('NA','','#DIV/0!'),as.is = TRUE)
+
+training$classe <- as.factor(training$classe)
+
+# Look at the data
+summary(training)
+summary(testing)
+
+# Remove NAs
+naTrain <- apply(training,2,function(x){sum(is.na(x))})
+trainClean <- training[,which(naTrain==0)]
+
+naTest <- apply(testing,2,function(x){sum(is.na(x))})
+testClean <- testing[,which(naTest==0)]
+
+# Remove Near Zero Variables
+nzvTrain <- nearZeroVar(trainClean,saveMetrics=TRUE)
+trainClean <- trainClean[,which(nzvTrain$nzv==FALSE)]
+dim(trainClean)
+
+nzvTest<- nearZeroVar(testClean,saveMetrics=TRUE)
+testClean <- testClean[,which(nzvTest$nzv==FALSE)]
+dim(testClean)
+
+# Remove first six columns - we want to include the data from accelerometers on the belt, forearm, arm, and dumbell
+trainClean <- trainClean[7:NCOL(trainClean)]
+testClean <- testClean[7:NCOL(testClean)]
+
+# Split training data into training and cross-validation
+# We need a separate cross-validation data set to see how well the model predicts
+inTrain <- createDataPartition(trainClean$classe,p=0.6,list=FALSE)
+trainFinal <- trainClean[inTrain,]
+trainCV <- trainClean[-inTrain,]
+dim(trainFinal)
+dim(trainCV)
+
+```
+
+### 3. Train the model and check out-of-sample error
+
+```{r trainModel, echo=TRUE}
+# Train the model - commented out in the HTML for performance reasons
+# Use the saved model in modFit.rda instead
+# I'm using the Random Forest model as it seemed to be a strong performer in the lecture notes and in Kaggle competitions.
+# The training method will be Cross Validation with 5 folds.  We want parallel processing if possible.
+#modFit <- train(classe~., method='rf',data=trainFinal,trControl=trainControl(method='cv',number=5),allowParallel=TRUE)
+#modFit
+
+# Save the model
+#save(modFit,file="modFit.rda")
+load("modFit.rda")
+modFit
+
+# Predict using the training data
+trainPred <- predict(modFit,trainFinal)
+confusionMatrix(trainPred,trainFinal$classe)
+
+# Cross-Validation using the model
+crossValidPred <- predict(modFit,trainCV)
+confusionMatrix(crossValidPred,trainCV$classe)
+
+# Accuracy is Accuracy : 0.9902
+# Let's plot the predicted classe against the actual classe to compare
+source("toNum.R")
+result <- data.frame(predClasse=as.character(crossValidPred),classe=as.character(trainCV$classe))
+result <- result %>% rowwise() %>% mutate(predClasseN=toNum(predClasse))
+result <- result %>% rowwise() %>% mutate(classeN=toNum(classe))
+plot(jitter(result$predClasseN,1),jitter(result$classeN,1),pch=1)
+abline(lm(result$predClasseN~result$classeN),col='blue')
+
+# Compute correlation between predicted and actual classe values
+cor(result$predClasseN,result$classeN)
+
+# The result is 0.9970786 which shows that the model is doing a good job
+# of predicting.  It's good enough to move to the next phase in the project
+# and predict using the testing data.
+
+```
+
+### 4. Predict using the testing data
+
+```{r predictUsingTestData, echo=TRUE}
+# Now predict the values using testing data set
+testPred <- predict(modFit,testClean)
+testPred
+
+# Recombine with original test data set
+testFinal <- select(testing,c(user_name,problem_id))
+testFinal$classe <- testPred
+testFinal
+```
